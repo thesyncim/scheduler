@@ -9,27 +9,45 @@ import (
 )
 
 type Scheduler struct {
-	jobs *delayedJobs
-	sync.RWMutex
+	jobs *jobQueue
+	wait sync.WaitGroup
+}
+
+func handlejobQueue(s *Scheduler) {
+	c := time.Tick(200 * time.Millisecond)
+	for now := range c {
+
+		if s.jobs.Len() > 0 {
+			log.Println("tick", s.jobs.NextDeadLine())
+			nowUnix := ToUnixTimestamp(now)
+			deadline := ToUnixTimestamp(s.jobs.NextDeadLine())
+			if nowUnix > deadline {
+				job := heap.Pop(s.jobs).(*job)
+				go job.Data.Run()
+			}
+		}
+	}
 }
 
 func New() (s *Scheduler) {
 	s = &Scheduler{}
-	s.jobs = &delayedJobs{}
+	s.jobs = &jobQueue{}
 	heap.Init(s.jobs)
 	log.Println("starting scheduler")
-	go HandledelayedJobs(s)
+
+	go handlejobQueue(s)
+
 	return
 }
 
-func (s *Scheduler) AddJob(ijob IJob) {
+func (s *Scheduler) AddJob(ijob Job) {
 	j := &job{}
 	j.Data = ijob
-	j.priority = ijob.Deadline().UTC().Truncate(time.Second).Unix()
+	j.priority = ToUnixTimestamp(ijob.Deadline())
 	heap.Push(s.jobs, j)
 }
 
-func (s *Scheduler) GetJobs() delayedJobs {
+func (s *Scheduler) GetJobs() jobQueue {
 	return *(s.jobs)
 }
 
@@ -37,11 +55,11 @@ func (s *Scheduler) RemoveJob(id bson.ObjectId) {
 	s.jobs.RemoveJob(id)
 }
 
-func (s *Scheduler) GetJob(id bson.ObjectId) IJob {
+func (s *Scheduler) GetJob(id bson.ObjectId) Job {
 	return s.jobs.GetJobDetails(id)
 }
 
-//func (s *Scheduler) UpdateJob(job IJob) {
+//func (s *Scheduler) UpdateJob(job Job) {
 //	job.GetId()
 //	return s.jobs.Update(item, data, priority)
 //}
